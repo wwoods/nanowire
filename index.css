@@ -1,0 +1,81 @@
+
+body {
+    background-color: #fff;
+    color: #000;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.container canvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.help {
+    position: absolute;
+    right: 10px;
+    top: 10px;
+}
+
+
+.controls {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+}
+
+input.seedPoints, input.gridSize {
+    width: 3em;
+}
+
+input.equation {
+    width: 30em;
+}
+
+.advance {
+    width: 10em;
+    height: 2em;
+}
+
+.reset {
+    width: 10em;
+    height: 2em;
+}
+
+.nodeLabel {
+    display: inline-block;
+    position: absolute;
+    color: #fff;
+
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+.gaInfo {
+    background-color: #ffd;
+    display: inline-block;
+}
