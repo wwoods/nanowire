@@ -14,6 +14,7 @@ class Grid uses sjs.EventMixin
       "METHOD_ONE"
       "METHOD_TWO"
       "METHOD_THREE"
+      "NN"
       DEFAULT: "METHOD_TWO"
 
   constructor: (@size = 10, @sizeZ = @size) ->
@@ -95,7 +96,8 @@ class Grid uses sjs.EventMixin
       shortest[dest][src] = n
 
       # Generate new paths
-      if @states[dest] != Grid.STATE_SEED or src == dest
+      isSeed = (@states[dest] == Grid.STATE_SEED)
+      if not isSeed or src == dest
         {x, y, z} = @_split(dest)
         for nz in [-1:2]
           oz = z + nz
@@ -109,13 +111,22 @@ class Grid uses sjs.EventMixin
 
             # NOTE - For feed-forward network, we assume connectivity only heads
             # one direction.
-            for nx in [UNIDIRECTIONAL then 1 else -1:2]
+            for nx in [UNIDIRECTIONAL then 0 else -1:2]
               ox = x + nx
               if ox < 0 or ox >= @size
                 continue
 
               if nx == 0 and ny == 0 and nz == 0
                 continue
+
+              if UNIDIRECTIONAL
+                # Not diagonals
+                if nx and ny or nx and nz or ny and nz
+                  continue
+                # Seeds can only connect in positive x- space to prevent
+                # cycles
+                if isSeed and nx == 0
+                  continue
 
               oi = ox + @size * (oy + @size * oz)
               if @states[oi] != Grid.STATE_EMPTY
@@ -202,6 +213,17 @@ class Grid uses sjs.EventMixin
     return "(wire)"
 
 
+  resolveCell: (name) ->
+    """Returns the cell index for name"""
+    if name[0] == 'i'
+      return @inputs[parseInt(name[1:]) - 1]
+    if name[0] == 'h'
+      return @hidden[parseInt(name[1:]) - 1]
+    if name[0] == 'o'
+      return @outputs[parseInt(name[1:]) - 1]
+    throw new Error("Bad cell name: #{ name }")
+
+
   nameInput: (i) ->
     """Returns the name for input #i. """
     return "i#{ i + 1 }"
@@ -276,6 +298,7 @@ class Grid uses sjs.EventMixin
 
     @step = 0
     @event.trigger "updatePost", -1
+    @event.trigger "reset"
 
 
   update: ->
@@ -518,6 +541,34 @@ class Grid uses sjs.EventMixin
         # Connect two close-together wires when one is growing
         canChange = true
         nextState = Grid.STATE_NANO
+    elif @method == Grid.METHOD.NN
+      if curState == Grid.STATE_NANO
+        return null
+        canChange = true
+        if Math.random() < 0.05
+          nextState = Grid.STATE_DEAD
+      elif curState != Grid.STATE_EMPTY
+        return null
+      else
+        # This algorithm progresses to the right following wire connectivity
+        # rules
+        countLast = 0
+        countSibling = 0
+        for nz in [-1:2]
+          for ny in [-1:2]
+            neigh = @_wrapGet(x - 1, y + ny, z + nz)
+            if neigh != Grid.STATE_EMPTY and neigh != Grid.STATE_DEAD
+              countLast += 1
+            neigh = @_wrapGet(x, y + ny, z + nz)
+            if neigh != Grid.STATE_EMPTY and neigh != Grid.STATE_SEED
+              countSibling += 1
+        # We only want to grow in one direction, since that's how connectivity
+        # works
+        if countSibling == 0 or 1
+          if countLast and @_wrapGet(x - 1, y, z) == Grid.STATE_EMPTY
+            canChange = true
+            if Math.random() < 0.1
+              nextState = Grid.STATE_NANO
     else
       throw new Error("Unrecognized update #{ @METHOD.label(@method) }")
 

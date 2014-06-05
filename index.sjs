@@ -11,6 +11,8 @@ class GridDisplay uses sjs.EventMixin
 
   MAT_CONNECT: 100
   MAT_CONNECT_UNUSED: 101
+  MAT_SEED_ON: 102
+  MAT_SEED_OFF: 103
 
   boxSize: 50.0
 
@@ -25,6 +27,10 @@ class GridDisplay uses sjs.EventMixin
         color: 0x00ff00, opacity: 1.0)
     @mats[GridDisplay.MAT_CONNECT_UNUSED] = new THREE.MeshLambertMaterial(
         color: 0xffffff, opacity: 0.6)
+    @mats[GridDisplay.MAT_SEED_ON] = new THREE.MeshLambertMaterial(
+        color: 0xff0000, opacity: 1.0)
+    @mats[GridDisplay.MAT_SEED_OFF] = new THREE.MeshLambertMaterial(
+        color: 0xddcccc, opacity: 0.6)
 
     @geometry = new THREE.BoxGeometry(@boxSize, @boxSize, @boxSize)
     @mode = GridDisplay.MODE_NORMAL
@@ -37,6 +43,12 @@ class GridDisplay uses sjs.EventMixin
     @render()
     @grid.event.on 'updatePost', @@render
     @grid.event.on 'resize', @@resize
+    @grid.event.on 'reset', ->
+      @states = {}
+
+
+  getState: (name) ->
+    return @states[name] then 1 else 0
 
 
   raycast: (px, py) ->
@@ -74,14 +86,6 @@ class GridDisplay uses sjs.EventMixin
     @meshes = []
     @meshMap = {}
 
-    if @mode == GridDisplay.MODE_CONNECT
-      # Fills in @connections with whether or not blocks are part of the
-      # shortest path between two nodes.
-      @connections = @grid.connect()
-    else
-      @connections = null
-    @event.trigger "connections", @grid, @connections
-
     halfDim = @boxSize * 0.5 * (@grid.size - 1)
     halfDimZ = @boxSize * 0.5 * (@grid.sizeZ - 1)
     for z in [:@grid.sizeZ]
@@ -97,7 +101,11 @@ class GridDisplay uses sjs.EventMixin
               mesh.material = @mats[@grid.states[i]]
             elif @mode == GridDisplay.MODE_CONNECT
               if @grid.states[i] == Grid.STATE_SEED
-                mesh.material = @mats[@grid.states[i]]
+                name = @grid.matchCell(i)
+                if @states[name]
+                  mesh.material = @mats[GridDisplay.MAT_SEED_ON]
+                else
+                  mesh.material = @mats[GridDisplay.MAT_SEED_OFF]
               elif @connections.members[i]
                 mesh.material = @mats[GridDisplay.MAT_CONNECT]
               else
@@ -117,6 +125,27 @@ class GridDisplay uses sjs.EventMixin
 
 
   setMode: (@mode) ->
+    if @mode == GridDisplay.MODE_CONNECT
+      # Fills in @connections with whether or not blocks are part of the
+      # shortest path between two nodes.
+      @connections = @grid.connect()
+    else
+      @connections = null
+    @event.trigger "connections", @grid, @connections
+    @render()
+
+
+  setState: (name, newState) ->
+    @states[name] = newState
+
+
+  updateStates: (solver) ->
+    """Given a GeneticSolver, update all of our node states based on current
+    input states."""
+    inArgs = []
+    for i in [:@grid.inputs.length]
+      inArgs.push(@states[@grid.nameInput(i)] then 1 else 0)
+    @states = solver.runTables(inArgs)
     @render()
 
 
@@ -129,6 +158,10 @@ class GridDisplay uses sjs.EventMixin
       t = oldLabels[cellIndex]
       if not t?
         t = $('<div class="nodeLabel">').appendTo(@overlay)
+        async
+          t.bind "click", (e) ->
+            @event.trigger "pickCell", cellIndex, [ -1, -1, -1 ]
+            e.stopPropagation()
       else
         delete oldLabels[cellIndex]
       if t.text() != label
@@ -141,7 +174,7 @@ class GridDisplay uses sjs.EventMixin
       @labels[cellIndex] = t
 
     for si, i in @grid.inputs
-      addLabel @grid.nameInput(i), si
+      addLabel @grid.nameInput(i), si, true
     for si, i in @grid.outputs
       addLabel @grid.nameOutput(i), si
     for si, i in @grid.hidden
@@ -206,6 +239,8 @@ $ ->
       + "mouse wheel to zoom")
   $('<br />').appendTo(helpBar)
   gaInfo = $('<div class="gaInfo">').appendTo(helpBar)
+  gaInfo.bind "click mousewheel mousemove mouseup mousedown", (e) ->
+    e.stopPropagation()
 
   infoBar = $('<div class="controls">').appendTo('body')
   infoBar.bind "mousedown click", (e) ->
@@ -233,13 +268,17 @@ $ ->
   connectionInfo = $('<div>')
       .appendTo(infoBar)
   gridDisplay.event.on "connections", (grid, conn) ->
+    # declared later, also updates connection info
+    bestScores = updateGenetics()
+
     if not conn?
       connectionInfo.text "Check 'Connect' for connection stats"
       return
 
     connectionInfo.empty()
         .append("Using #{ (100 * conn.wireUsePct).toFixed(1) }% of wires in "
-          + "shortest paths;")
+          + "connections; #{ bestScores.score*100 }% after "
+          + "#{ bestScores.evaluations } evaluations")
         .append("<br>")
         .append("#{ conn.avgConnectivity.toFixed(1) } "
           + "avg connectivity; #{ conn.avgLength.toFixed(1) } avg length")
@@ -263,7 +302,7 @@ $ ->
         .appendTo(infoBar))
 
   eqInput = $('input',
-      $('<div><input type="text" value="o2=(i1+i2+i3)&1; o1=i1+i2+i3 > 1" class="equation" /> '
+      $('<div><input type="text" value="o1=(i1+i2+i3)&1; o2=i1+i2+i3 > 1" class="equation" /> '
         + 'desired output (semicolon separated o1=f(i1, i2, ...); o2=f(i1, i2, ...))')
         .appendTo(infoBar))
 
@@ -281,6 +320,9 @@ $ ->
         if not use3d.is(':checked')
           sizeZ = 1
         grid.reset(seedPoints.val(), size, sizeZ)
+        if connectCheck.is(':checked')
+          # Clear out old connections / GA info
+          gridDisplay.setMode(GridDisplay.MODE_CONNECT)
   advButton = $('<input class="advance" type="button" value="Next" />')
       .appendTo(controlBar)
       .bind "mousedown", ->
@@ -303,6 +345,9 @@ $ ->
         if lastKnownPossible[0] == 0
           resetButton.trigger "click"
         grid.updateFinish()
+        # Re-do connections
+        if connectCheck.is(':checked')
+          gridDisplay.setMode(GridDisplay.MODE_CONNECT)
 
   connectCheck = $('<input type="checkbox">')
       .appendTo(controlBar)
@@ -313,16 +358,76 @@ $ ->
         else
           gridDisplay.setMode(GridDisplay.MODE_NORMAL)
 
+
+  evolveCompare = $('<input class="advance" type="button" value="Compare GA to HC">')
+      .appendTo(controlBar)
+      .bind "click", ->
+        if not connectCheck.is(':checked')
+          connectCheck.prop('checked', true).trigger('change')
+        # Now, solve several times and note the average
+        trials = 20
+        gaScore = 0.0
+        gaSteps = 0.0
+        hcScore = 0.0
+        hcSteps = 0.0
+
+        for _ in [:trials]
+          r = genetics.solve(eqInput.val(), gridDisplay.connections,
+              learnType: genetics.EVOLVE.GA)
+          gaScore += r.score
+          gaSteps += r.evaluations
+          r = genetics.solve(eqInput.val(), gridDisplay.connections,
+              learnType: genetics.EVOLVE.HC)
+          hcScore += r.score
+          hcSteps += r.evaluations
+
+        gaScore /= trials
+        gaSteps /= trials
+        hcScore /= trials
+        hcSteps /= trials
+        gaInfo.empty()
+            .append("<div>Averages of #{ trials } trials</div>")
+            .append("<div>GA: #{ gaScore } (#{ gaSteps } evals)</div>")
+            .append("<div>HC: #{ hcScore } (#{ hcSteps } evals)</div>")
+
   # ==== Genetic algorithm hooks ====
-  genetics = new GeneticSolver()
+  genetics = new GeneticSolver(grid)
+  runGrid = ->
+    gridDisplay.updateStates(genetics)
   updateGenetics = ->
-    genetics.solve(eqInput.val(), grid, gridDisplay.connections)
-  gridDisplay.event.on "connections", updateGenetics
-  eqInput.bind "change", updateGenetics
+    r = genetics.solve(eqInput.val(), gridDisplay.connections)
+    runGrid()
+    return r
+  eqInput.bind "change", -> gridDisplay.event.trigger "connections", grid,
+      gridDisplay.connections
   gridDisplay.event.on "pickCell", (cellId, cellPos) ->
     if cellId?
       id = grid.matchCell(cellId)
-      gaInfo.text(id)
+
+      if cellId in grid.inputs
+        gridDisplay.setState(id, 1 - gridDisplay.getState(id))
+        runGrid()
+
+      value = gridDisplay.getState(id)
+      gaInfo.text("#{ id } - #{ value }")
+      if id of genetics.tables
+        gtable = genetics.tables[id]
+        table = $('<table class="gaLookup">').appendTo(gaInfo)
+        header = $('<tr class="header">').appendTo(table)
+        for i in gtable.inputs
+          $('<td>').text(i).appendTo(header)
+        $('<td>').text('value').appendTo(header)
+        for output, i in gtable.outputs
+          ib = i
+          row = $('<tr>').appendTo(table)
+          for j in [:gtable.inputs.length]
+            cell = $('<td>').appendTo(row)
+            if ib & 1
+              cell.text('1')
+            else
+              cell.text('0')
+            ib = ib >> 1
+          $('<td>').text(output then 1 else 0).appendTo(row)
     else
       gaInfo.text("Click on something!")
   gridDisplay.event.trigger "pickCell", null

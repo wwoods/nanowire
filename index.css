@@ -79,3 +79,17 @@ input.equation {
     background-color: #ffd;
     display: inline-block;
 }
+
+.gaLookup {
+  max-height: 300px;
+  overflow-y: auto;
+  display: block;
+}
+
+.gaLookup .header {
+  border-bottom: solid 1px #000;
+}
+
+.gaLookup td {
+  padding-right: 1em;
+}
