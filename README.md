@@ -23,7 +23,7 @@ or
 
 ## Description
 
-Contains four main source files:
+Contains five main source files:
 
 * grid.sjs - Actual Cellular Automata update and stats calculation code, as well
   as connectivity used by Genetic Algorithms / calculation
@@ -35,10 +35,18 @@ Contains four main source files:
     genetic algorithm information, etc.
 
 
+img/ folder contains screenshots and presentation slides in PDF form.
+
 Connectivity flows forward or sideways only, it does not go backward.  This is
 so that we do not get cycles.  It may be thought of as nanowires are only
 permitted to grow in one direction and their conductance can only head in the
-same direction as growth.
+same direction as growth.  This may be realized via temporal multiplexing or
+perhaps different, distinguishable AC currents put through the nanowire at
+the same time.  Not the most efficient connectivity, but physically very
+straightforward to construct.
+
+Example output from analyze.sjs and analyzeConnectivity.sjs are in the files
+analyze.out and analyzeConnectivity.out
 
 
 ## Genetic Algorithm
