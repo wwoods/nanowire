@@ -183,11 +183,11 @@ great connectivity with 8 seeds.  Manual inspection shows that a lot of
 METHOD_ONE's issues come from not being able to bridge the following
 configuration:
 
-=====
-=X  =
-=  X=
-=   =
-=====
+    =====
+    =X  =
+    =  X=
+    =   =
+    =====
 
 That is, the current cell would need to be populated to connect two separate
 networks, but the neighbors are not both part of the same pole.
