@@ -296,10 +296,11 @@ $ ->
   methodSelect.bind "change", ->
     grid.method = parseInt(methodSelect.val())
 
-  sizeInput = $('input',
-      $('<div><input type="text" value="10" class="gridSize" /> '
-        + 'cells per side</div>')
-        .appendTo(infoBar))
+  sizeInputDiv = $('<div>').appendTo(infoBar)
+  sizeInput = $('input', $('<span><input type="text" value="10" class="gridSize" /> '
+      + 'cells per side</span>').appendTo(sizeInputDiv))
+  flattenHidden = $('input', $('<span>; <input type="checkbox">Flatten hidden '
+      + 'layer</input></span>').appendTo(sizeInputDiv))
 
   eqInput = $('input',
       $('<div><input type="text" value="o1=(i1+i2+i3)&1; o2=i1+i2+i3 > 1" class="equation" /> '
@@ -319,7 +320,8 @@ $ ->
         sizeZ = size
         if not use3d.is(':checked')
           sizeZ = 1
-        grid.reset(seedPoints.val(), size, sizeZ)
+        grid.reset(seedPoints.val(), size, sizeZ,
+            flattenHidden: flattenHidden.is(':checked'))
         if connectCheck.is(':checked')
           # Clear out old connections / GA info
           gridDisplay.setMode(GridDisplay.MODE_CONNECT)

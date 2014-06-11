@@ -184,7 +184,7 @@ class Grid uses sjs.EventMixin
     wireUsePct = usedWire / totalWire
 
     return { members, matrix: shortestBySeed, wireUsePct, avgConnectivity,
-        avgLength, wireFillPct }
+        avgLength, wireFillPct, connected }
 
 
   getSpecialCells: () ->
@@ -239,7 +239,7 @@ class Grid uses sjs.EventMixin
     return "o#{ i + 1 }"
 
 
-  reset: (nodeCounts, newSize, newSizeZ) ->
+  reset: (nodeCounts, newSize, newSizeZ, {< flattenHidden = false}) ->
     """Initialize an otherwise empty grid of size newSize x newSize x newSizeZ,
     with nodeCounts (colon delimited) seeds.
     """
@@ -279,7 +279,10 @@ class Grid uses sjs.EventMixin
             y = Math.floor((0.5 + j) * Math.floor(@size / c))
             z = Math.floor(@sizeZ * 0.5)
           else
-            x = Math.floor(Math.random() * (@size - 8)) + 4
+            if flattenHidden
+              x = Math.floor(@size * 0.5)
+            else
+              x = Math.floor(Math.random() * (@size - 6) + 3)
             y = Math.floor(Math.random() * @size)
             z = Math.floor(Math.random() * @sizeZ)
           si = x + @size * (y + @size * z)

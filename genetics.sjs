@@ -28,8 +28,9 @@ class BitGenome
       r.bits.push @bits[i]
     for i in [split:@bits.length]
       r.bits.push other.bits[i]
-    for j in [:Math.floor(Math.random() * Math.ceil(
-        Math.random() * @bits.length * 0.20))]
+    alpha = 1
+    for j in [:Math.ceil(Math.random() * @bits.length * 0.30 * alpha
+        / (alpha + @generation))]
       i = Math.floor(Math.random() * @bits.length)
       if r.bits[i]
         r.bits[i] = 0
@@ -50,18 +51,19 @@ class BitGenome
       @bumpSegment = null
     elif @score >= @lastScore
       # Did better or same, keep same segment, refine
-      if @bumpForce > 0.01
+      if @bumpForce >= 0.05
         @bumpForce *= 0.5
       else
         lastBump = @bumpSegment
     else
-      # Did worse, change segment
+      # Did worse, revert and change segment
+      r.bits = @originalBits
       lastBump = @bumpSegment
 
-    alpha = 100
+    alpha = 10
     while @bumpSegment == lastBump
       @bumpSegment = Math.floor(Math.random() * solver.tableStarts.length)
-      @bumpForce = 0.5 * alpha / (alpha + @generation)
+      @bumpForce = 0.6 * alpha / (alpha + @generation)
 
     r.bumpSegment = @bumpSegment
     r.bumpForce = @bumpForce
@@ -71,12 +73,14 @@ class BitGenome
     if r.bumpSegment < solver.tableStarts.length - 1
       segEnd = solver.tableStarts[r.bumpSegment + 1]
 
-    for b in [segStart:segEnd]
-      if Math.random() < r.bumpForce
-        if r.bits[b]
-          r.bits[b] = 0
-        else
-          r.bits[b] = 1
+    r.originalBits = r.bits[:]
+    for _try in [:Math.ceil(Math.random() * r.bumpForce * (segEnd - segStart))]
+      p = Math.floor(Math.random() * (segEnd - segStart))
+      b = segStart + p
+      if r.bits[b]
+        r.bits[b] = 0
+      else
+        r.bits[b] = 1
 
     return r
 
@@ -103,16 +107,17 @@ class GeneticSolver
       index = 0
       indexSet = 1
       for j in @tables[t].inputs
-        if j not of results
+        r = results[j]
+        if not r?
           throw new Error("Could not find results[#{ j }] during calculation")
-        if results[j]
+        if r
           index += indexSet
         indexSet *= 2
       results[t] = @tables[t].outputs[index]
     return results
 
 
-  solve: (equations, connections, {< learnType = GeneticSolver.EVOLVE.GA}) ->
+  solve: (equations, connections, {< learnType = GeneticSolver.EVOLVE.GA, populationSize = 20, maxRounds = 1000}) ->
     """Given
     equations - Semicolon delimited string like "o1=i1 + i2;o2 = i2".  If any
         expression is non-zero, output will be 1.  Otherwise, output is 0.  An
@@ -122,7 +127,8 @@ class GeneticSolver
 
     Populate our @tables with a solution table for each node.
 
-    Returns object: { score: best score, rounds: # of rounds taken }
+    Returns object: { score: best score, rounds: # of rounds taken,
+        evaluations: # of fitness evaluations run }
     """
     # { cell name : { inputs: [ i1, i2, ... ], outputs[number from i3, i2, i1] : cell output bit,
     #    refs: number of cells relying on this one directly or indirectly } }
@@ -134,13 +140,15 @@ class GeneticSolver
       return
 
     # Step 0 - find and organize our output functions as terms of inputs
-    oldDefine = window.define
+    if window?
+      oldDefine = window.define
     try
       r = @_resolveOutputs(equations)
       ofuncs = r[0]
       outputBitstream = r[1]
     finally
-      window.define = oldDefine
+      if window?
+        window.define = oldDefine
 
     # ofuncs now defines which outputs we care about, and outputBitstream
     # defines all permutations in the final output table.  Now, determine inputs
@@ -155,6 +163,24 @@ class GeneticSolver
         if not connections.matrix[c][si]?
           continue
         t.inputs.push @grid.matchCell(c)
+
+    # Now that we have an input tree, prune it back so that we HAVE to infer
+    # inputs through children...  In other words, inputs to my inputs are not
+    # my inputs.
+    prunedInputsT = {}
+    for si in @grid.hidden.concat(@grid.outputs)
+      name = @grid.matchCell(si)
+      t = @tables[name]
+      prunedInputs = prunedInputsT[name] = t.inputs[:]
+      for i in t.inputs
+        t2 = @tables[i]
+        if t2?
+          for j in t2.inputs
+            tj = prunedInputs.indexOf(j)
+            if tj >= 0
+              prunedInputs.splice(tj, 1)
+    for tname, inputs of prunedInputsT
+      @tables[tname].inputs = inputs
 
     # ref count, this way we know who to compute the output of first so that
     # calculations are combinatorially stable
@@ -184,12 +210,13 @@ class GeneticSolver
       @tableStarts.push bitsNeeded
       bitsNeeded += Math.pow(2, @tables[t].inputs.length)
 
-    console.log @tableOrder
-    console.log @tableStarts
-    console.log @tables
+    if window?
+      console.log @tableOrder
+      console.log @tableStarts
+      console.log @tables
 
     population = []
-    for i in [:20]
+    for i in [:populationSize]
       population.push new BitGenome(bitsNeeded)
 
     totalScore = 0.0
@@ -201,7 +228,7 @@ class GeneticSolver
           return p
       return population[-1:][0]
 
-    for round in [1:1000]
+    for round in [:maxRounds]
       totalScore = 0.0
       bestScore = -1.0
       best = null
@@ -234,6 +261,9 @@ class GeneticSolver
 
     # Use best
     best.overwriteTables(@)
+    # If we broke early, we actually did one more round
+    if round < maxRounds
+      round += 1
 
     return {
         score: Math.sqrt(bestScore)
@@ -242,22 +272,33 @@ class GeneticSolver
 
 
   _resolveOutputs: (equations) ->
-    window.define = (a, b) -> lastOutput[0] = b()
+    if window?
+      window.define = (a, b) -> lastOutput[0] = b()
     ofuncs = []
     lastOutput = [ null ]
     inArgs = []
     for i in [:@grid.inputs.length]
       inArgs.push @grid.nameInput(i)
-    inArgs = inArgs.join(',')
     for o in @grid.outputs
       ofuncs.push null
     for s in equations.split(';')
+      if s.trim().length == 0
+        continue
       sa = s.trim().split('=')
       if sa.length != 2
         throw new Error("Bad equation: #{ s }")
       oIndex = parseInt(sa[0].trim().substring(1))
-      ofuncs[oIndex] = new Function(inArgs,
-          sjs.getJsForEval('o=' + sa[1].trim()))
+      if sjs.getJsForEval?
+        ofuncs[oIndex] = new Function(inArgs.join(','),
+            sjs.getJsForEval('o=' + sa[1].trim()))
+      else
+        vm = require('vm')
+        functionSandbox = vm.createContext()
+        lastOutput[0] = functionSandbox
+        ofuncs[oIndex] = () ->
+          for name, i in inArgs
+            functionSandbox[name] = arguments[i]
+          sjs.eval "o=" + sa[1].trim(), sandbox: functionSandbox
 
     # Step 1 - generate a oo_oo_oo_oo... bitstream for all possible inputs;
     # outputs with a null arg are excluded
@@ -282,22 +323,24 @@ class GeneticSolver
 
   _score: (organism, numInputs, expectedOutputs) ->
     """Returns a [0, 1] score for organism, with 1.0 being perfect."""
-    foundOutputs = []
     organism.overwriteTables(@)
+    outNames = []
+    for o in [:@grid.outputs.length]
+      outNames.push @grid.nameOutput(o)
+    matched = 0
+    matchedIndex = 0
+    inArgs = []
     for i in [:Math.pow(2, numInputs)]
-      inArgs = []
       ib = i
       for j in [:numInputs]
-        inArgs.push ib & 1
+        inArgs[j] = ib & 1
         ib = ib >> 1
       outputs = @runTables(inArgs)
-      for o in [:@grid.outputs.length]
-        foundOutputs.push(outputs[@grid.nameOutput(o)])
-    if expectedOutputs.length != foundOutputs.length
-      throw new Error("Bad number of outputs (#{ foundOutputs.length } / #{ expectedOutputs.length })")
-    right = 0
-    for i in [:expectedOutputs.length]
-      if expectedOutputs[i] == foundOutputs[i]
-        right += 1
-    r = right / expectedOutputs.length
+      for o in outNames
+        if expectedOutputs[matchedIndex] == outputs[o]
+          matched += 1
+        matchedIndex += 1
+    if expectedOutputs.length != matchedIndex
+      throw new Error("Bad number of outputs (#{ matchedIndex } / #{ expectedOutputs.length })")
+    r = matched / expectedOutputs.length
     return r * r

@@ -1,9 +1,7 @@
+"""Analyzes the GA's ability to deduce an answer."""
 
+require ./genetics for GeneticSolver
 require ./grid for Grid
-
-g = new Grid()
-console.log "update,sizeXY,sizeZ,numSeeds,avgConn,devConn,fullyConn,"
-    + "avgLength,devLength,avgUsage,devUsage,avgFill,devFill"
 
 getEstimatedError = (avg, dev, trialCount) ->
   """Returns estimated [0, 100]% error in avg from the true population mean.
@@ -24,76 +22,99 @@ getEstimatedError = (avg, dev, trialCount) ->
   return r
 
 
+g = new Grid()
+gs = new GeneticSolver(g)
+seeds = "3:5:2"
+gsEquations = "o1=(i1+i2+i3)&1; o2=i1+i2+i3>1"
+console.log "update,tableSolver,sizeXY,sizeZ,seedPattern,trials,numRight,score,scoreDev,evals,evalsDev"
+
 sqr = (x) -> x * x
-for method in Grid.METHOD.all()
+for method in [ Grid.METHOD.METHOD_TWO ]  # Grid.METHOD.all()
   g.method = method
   for s in [10,20]
     for z in [1,s]
-      for seeds in [2,4,8]
-        trials = []
-        for trial in [:100]
-          if z
-            g.reset(seeds, s)
-          else
-            g.reset(seeds, s, 1)
+      # Do both trials on same connectivity graph, so that it's a fair
+      # comparison
+      trialsG = []
+      trialsH = []
+      for trial in [:100]
+        if z
+          g.reset(seeds, s)
+        else
+          g.reset(seeds, s, 1)
 
-          g.updateFinish()
-          trials.push g.connect()
+        g.updateFinish()
+        conn = g.connect()
+        trialsG.push gs.solve(gsEquations, conn, learnType:
+            GeneticSolver.EVOLVE.GA)
+        trialsH.push gs.solve(gsEquations, conn, learnType:
+            GeneticSolver.EVOLVE.HC)
 
-          if trial >= 5
-            # Check expected error on a metric that is likely to change (not
-            # connectivity!)
-            wireUse = 0.0
-            for t in trials
-              wireUse += t.wireUsePct
-            wireUse /= trials.length
-            devUse = 0.0
-            for t in trials
-              devUse += sqr(t.wireUsePct - wireUse)
-            devUse = Math.sqrt(devUse / (trials.length - 1))
-            if getEstimatedError(wireUse, devUse, trials.length) < 10.0
-              # No need to run more!
-              break
+        if trial >= 5 and false
+          # Check expected error on a metric that is likely to change (not
+          # connectivity!)
+          wireUse = 0.0
+          for t in trials
+            wireUse += t.evaluations
+          wireUse /= trials.length
+          devUse = 0.0
+          for t in trials
+            devUse += sqr(t.evaluations - wireUse)
+          devUse = Math.sqrt(devUse / (trials.length - 1))
+          if getEstimatedError(wireUse, devUse, trials.length) < 10.0
+            # No need to run more!
+            # No early breaks... break
+            continue
 
-        fullyConn = 0.0
-        avgConn = 0.0
-        avgLen = 0.0
-        wireUse = 0.0
-        wireFill = 0.0
+      numRightG = 0
+      avgScoreG = 0
+      avgEvalsG = 0
+      numRightH = 0
+      avgScoreH = 0
+      avgEvalsH = 0
 
-        for t in trials
-          # Floating point errors, use a buffer...
-          if t.avgConnectivity + 0.5 >= seeds - 1
-            fullyConn += 1
-          avgConn += t.avgConnectivity / (seeds - 1)
-          avgLen += t.avgLength
-          wireUse += t.wireUsePct
-          wireFill += t.wireFillPct
+      for t, i in trialsG
+        if t.score == 1.0
+          numRightG += 1
+        avgScoreG += t.score
+        avgEvalsG += t.evaluations
 
-        fac = 1.0 / trials.length
-        fullyConn *= fac
-        avgConn *= fac
-        avgLen *= fac
-        wireUse *= fac
-        wireFill *= fac
+        if trialsH[i].score == 1.0
+          numRightH += 1
+        avgScoreH += trialsH[i].score
+        avgEvalsH += trialsH[i].evaluations
 
-        devConn = 0.0
-        devLen = 0.0
-        devUse = 0.0
-        devFill = 0.0
-        for t in trials
-          devConn += sqr(t.avgConnectivity / (seeds - 1) - avgConn)
-          devLen += sqr(t.avgLength - avgLen)
-          devUse += sqr(t.wireUsePct - wireUse)
-          devFill += sqr(t.wireFillPct - wireFill)
+      fac = 1.0 / trialsG.length
+      avgScoreG *= fac
+      avgEvalsG *= fac
+      numRightG *= fac
+      avgScoreH *= fac
+      avgEvalsH *= fac
+      numRightH *= fac
 
-        fac = 1 / (trials.length - 1)
-        devConn = Math.sqrt(fac * devConn)
-        devLen = Math.sqrt(fac * devLen)
-        devUse = Math.sqrt(fac * devUse)
-        devFill = Math.sqrt(fac * devFill)
+      devScoreG = 0.0
+      devEvalsG = 0.0
+      devScoreH = 0.0
+      devEvalsH = 0.0
+      for t, i in trialsG
+        devScoreG += sqr(t.score - avgScoreG)
+        devEvalsG += sqr(t.evaluations - avgEvalsG)
+        devScoreH += sqr(trialsH[i].score - avgScoreH)
+        devEvalsH += sqr(trialsH[i].evaluations - avgEvalsH)
 
-        console.log "#{ Grid.METHOD.label(method) },#{ s },#{ z },#{ seeds },"
-            + "#{ avgConn },#{ devConn },#{ fullyConn },"
-            + "#{ avgLen },#{ devLen },"
-            + "#{ wireUse },#{ devUse },#{ wireFill },#{ devFill }"
+      fac = 1 / (trialsG.length - 1)
+      devScoreG = Math.sqrt(fac * devScoreG)
+      devEvalsG = Math.sqrt(fac * devEvalsG)
+      devScoreH = Math.sqrt(fac * devScoreH)
+      devEvalsH = Math.sqrt(fac * devEvalsH)
+
+      console.log "#{ Grid.METHOD.label(method) },"
+          + "#{ GeneticSolver.EVOLVE.label(GeneticSolver.EVOLVE.GA) },"
+          + "#{ s },#{ z },#{ seeds },"
+          + "#{ trialsG.length },#{ numRightG },"
+          + "#{ avgScoreG },#{ devScoreG },#{ avgEvalsG },#{ devEvalsG }"
+      console.log "#{ Grid.METHOD.label(method) },"
+          + "#{ GeneticSolver.EVOLVE.label(GeneticSolver.EVOLVE.HC) },"
+          + "#{ s },#{ z },#{ seeds },"
+          + "#{ trialsG.length },#{ numRightH },"
+          + "#{ avgScoreH },#{ devScoreH },#{ avgEvalsH },#{ devEvalsH }"
